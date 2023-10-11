@@ -34,7 +34,7 @@ class AirflowETL:
         ) as spark_conn:
             with open(os.path.join(Variable.get("AIRFLOW_SQL_FOLDER"),
                                    "extract", source_system_name.lower(), source_system_tag.lower(),
-                                   scheme.lower(), f"{table_name.lower()}_{mode.lower()}")) as fp:
+                                   scheme.lower(), f"{table_name.lower()}-{mode.lower()}.sql")) as fp:
                 query = fp.read()
 
             var_pref = f"{source_system_tag.upper()}_{source_system_name.upper()}"
