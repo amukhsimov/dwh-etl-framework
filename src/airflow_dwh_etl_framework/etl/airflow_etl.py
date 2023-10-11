@@ -16,7 +16,7 @@ class AirflowETL:
         jdbc_df.write.orc(datalake_target_path, mode='overwrite')
 
     @classmethod
-    def _extract_db(cls, source_system_name, source_system_tag, scheme, table_name, mode):
+    def _extract_db(cls, task_id, source_system_name, source_system_tag, scheme, table_name, mode):
         """
         :param source_system_name: Source system (e.g.: flexcube)
         :param source_system_tag: Source system tag (e.g.: main, test, prod)
@@ -30,7 +30,7 @@ class AirflowETL:
         assert mode in ('full',)  # 'delta' is not implemented yet
 
         with SparkConnector(
-                app_name=f"extract_{source_system_name.lower()}_{source_system_tag.lower()}_{table_name.lower()}"
+                app_name=task_id
         ) as spark_conn:
             with open(os.path.join(Variable.get("AIRFLOW_SQL_FOLDER"),
                                    "extract", source_system_name.lower(), source_system_tag.lower(),
@@ -62,8 +62,11 @@ class AirflowETL:
         :param mode: full/delta
         :return:
         """
-        return PythonOperator(python_callable=AirflowETL.extract_db,
+        task_id = f"extract_{source_system_name.lower()}_{source_system_tag.lower()}_{table_name.lower()}_task"
+        return PythonOperator(python_callable=AirflowETL._extract_db,
+                              task_id=task_id,
                               op_kwargs={
+                                  "task_id": task_id,
                                   "source_system_name": source_system_name,
                                   "source_system_tag": source_system_tag,
                                   "scheme": scheme,
