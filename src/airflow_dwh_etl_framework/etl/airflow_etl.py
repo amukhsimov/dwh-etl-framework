@@ -45,7 +45,7 @@ class AirflowETL:
                 source_system_name.lower(),
                 source_system_tag.lower(),
                 scheme.lower(),
-                f"{table_name.lower()}.orc"
+                f"{table_name.lower()}"
             )
 
             if mode == 'full':
