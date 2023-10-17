@@ -20,7 +20,7 @@ class AirflowETL:
         :param params: load parameters
         :return:
         """
-        if 'mode' in params:
+        if params and 'mode' in params:
             assert params['mode'] in ('overwrite', 'append'), f'Invalid spark write mode: {params["mode"]}'
             mode = params['mode']
         else:
