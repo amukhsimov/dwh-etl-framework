@@ -11,30 +11,31 @@ class AirflowETL:
         self.dag: DAG = dag
 
     @classmethod
-    def _extract_db_full(cls, spark_connector, url, driver, query, datalake_target_path):
-        jdbc_df = spark_connector.read_jdbc(url=url, driver=driver, query=query)
-        jdbc_df.write.orc(datalake_target_path, mode='overwrite')
-
-    @classmethod
-    def _extract_db(cls, task_id, source_system_name, source_system_tag, scheme, table_name, mode):
+    def _extract_db_full(cls, task_id, source_system_name, source_system_tag, scheme, table_name, params=None):
         """
         :param source_system_name: Source system (e.g.: flexcube)
         :param source_system_tag: Source system tag (e.g.: main, test, prod)
         :param scheme: Scheme name in source database
         :param table_name: Table
-        :param mode: full/delta
+        :param params: load parameters
         :return:
         """
-        if mode == 'delta':
-            raise NotImplementedError('Delta load mode is not implemented yet')
-        assert mode in ('full',)  # 'delta' is not implemented yet
+        if 'mode' in params:
+            assert params['mode'] in ('overwrite', 'append'), f'Invalid spark write mode: {params["mode"]}'
+            mode = params['mode']
+        else:
+            mode = 'overwrite'
 
         with SparkConnector(
                 app_name=task_id
         ) as spark_conn:
-            with open(os.path.join(Variable.get("AIRFLOW_SQL_FOLDER"),
-                                   "extract", source_system_name.lower(), source_system_tag.lower(),
-                                   scheme.lower(), f"{table_name.lower()}-{mode.lower()}.sql")) as fp:
+            fname = os.path.join(Variable.get("AIRFLOW_SQL_FOLDER"),
+                                 "extract", source_system_name.lower(), source_system_tag.lower(),
+                                 scheme.lower(), f"{table_name.lower()}-full.sql")
+            if not os.path.isfile(fname):
+                raise FileNotFoundError(fname)
+
+            with open(fname) as fp:
                 query = fp.read()
 
             var_pref = f"{source_system_tag.upper()}_{source_system_name.upper()}"
@@ -48,32 +49,81 @@ class AirflowETL:
                 f"{table_name.lower()}"
             )
 
-            if mode == 'full':
-                AirflowETL._extract_db_full(spark_connector=spark_conn,
-                                            url=url, driver=driver, query=query,
-                                            datalake_target_path=datalake_target_path)
+            jdbc_df = spark_conn.read_jdbc(url=url, driver=driver, query=query)
+            jdbc_df.write.orc(datalake_target_path, mode=mode)
 
-    def extract_db(self, source_system_name, source_system_tag, scheme, table_name, mode) -> BaseOperator:
+    @classmethod
+    def _extract_db_delta(cls, task_id, source_system_name, source_system_tag, scheme, table_name, params):
         """
         :param source_system_name: Source system (e.g.: flexcube)
         :param source_system_tag: Source system tag (e.g.: main, test, prod)
         :param scheme: Scheme name in source database
         :param table_name: Table
-        :param mode: full/delta
+        :param params: parameters for delta load
         :return:
         """
-        task_id = f"extract_{source_system_name.lower()}_{source_system_tag.lower()}_{table_name.lower()}_task"
-        return PythonOperator(python_callable=AirflowETL._extract_db,
-                              task_id=task_id,
-                              op_kwargs={
-                                  "task_id": task_id,
-                                  "source_system_name": source_system_name,
-                                  "source_system_tag": source_system_tag,
-                                  "scheme": scheme,
-                                  "table_name": table_name,
-                                  "mode": mode,
-                              },
-                              dag=self.dag)
+        # TODO
+        raise NotImplementedError()
+        # with SparkConnector(
+        #         app_name=task_id
+        # ) as spark_conn:
+        #     with open(os.path.join(Variable.get("AIRFLOW_SQL_FOLDER"),
+        #                            "extract", source_system_name.lower(), source_system_tag.lower(),
+        #                            scheme.lower(), f"{table_name.lower()}-full.sql")) as fp:
+        #         query = fp.read()
+        #
+        #     var_pref = f"{source_system_tag.upper()}_{source_system_name.upper()}"
+        #     url = Variable.get(f"{var_pref}_URL")
+        #     driver = Variable.get(f"{var_pref}_DRIVER")
+        #     datalake_target_path = os.path.join(
+        #         "s3a://datalake",
+        #         source_system_name.lower(),
+        #         source_system_tag.lower(),
+        #         scheme.lower(),
+        #         f"{table_name.lower()}"
+        #     )
+        #
+        #     jdbc_df = spark_conn.read_jdbc(url=url, driver=driver, query=query)
+        #     jdbc_df.write.orc(datalake_target_path, mode='overwrite')
+
+    def extract_db(self, source_system_name, source_system_tag, scheme, table_name,
+                   mode, **kwargs) -> BaseOperator:
+        """
+        :param source_system_name: Source system (e.g.: flexcube)
+        :param source_system_tag: Source system tag (e.g.: main, test, prod)
+        :param scheme: Scheme name in source database
+        :param table_name: Table
+        :param mode: full/delta/manual
+        :param kwargs: Parameters
+        :return:
+        """
+        if mode == 'full':
+            task_id = f"task_extract_" \
+                      f"{source_system_name.lower()}_{source_system_tag.lower()}_{table_name.lower()}_full"
+            return PythonOperator(python_callable=AirflowETL._extract_db_full,
+                                  task_id=task_id,
+                                  op_kwargs={
+                                      "task_id": task_id,
+                                      "source_system_name": source_system_name,
+                                      "source_system_tag": source_system_tag,
+                                      "scheme": scheme,
+                                      "table_name": table_name,
+                                      "params": kwargs,
+                                  },
+                                  dag=self.dag)
+        elif mode == 'delta':
+            task_id = f"extract_{source_system_name.lower()}_{source_system_tag.lower()}_{table_name.lower()}_delta"
+            return PythonOperator(python_callable=AirflowETL._extract_db_delta,
+                                  task_id=task_id,
+                                  op_kwargs={
+                                      "task_id": task_id,
+                                      "source_system_name": source_system_name,
+                                      "source_system_tag": source_system_tag,
+                                      "scheme": scheme,
+                                      "table_name": table_name,
+                                      "params": kwargs,
+                                  },
+                                  dag=self.dag)
 
     def transform(self, **kwargs) -> BaseOperator:
         raise NotImplementedError("AirflowETL.transform() is not implemented yet")
