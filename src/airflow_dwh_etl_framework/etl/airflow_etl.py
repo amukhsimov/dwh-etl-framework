@@ -88,6 +88,10 @@ class AirflowETL:
         #     jdbc_df = spark_conn.read_jdbc(url=url, driver=driver, query=query)
         #     jdbc_df.write.orc(datalake_target_path, mode='overwrite')
 
+    @classmethod
+    def foo(cls):
+        print(123123123)
+
     def extract_db(self, source_system_name, source_system_tag, scheme, table_name,
                    mode, params=None) -> BaseOperator:
         """
@@ -107,10 +111,6 @@ class AirflowETL:
 
         task_id = f"task_extract_" \
                   f"{source_system_name}_{source_system_tag}_{table_name}_full"
-        return PythonOperator(python_callable=foo,
-                              task_id=task_id,
-                              dag=self.dag)
-
         if mode == 'full':
             task_id = f"task_extract_" \
                       f"{source_system_name}_{source_system_tag}_{table_name}_full"
