@@ -14,7 +14,7 @@ setup(
     description=DESCRIPTION,
     long_description=LONG_DESCRIPTION,
     install_requires=[
-        'pyspark==3.4.1',
+        #'pyspark==3.4.1',
         'psycopg2-binary==2.9.7',
         'cx_Oracle==8.3.0',
         'pandas==2.1.0',
