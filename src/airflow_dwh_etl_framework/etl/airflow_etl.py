@@ -87,16 +87,22 @@ class AirflowETL:
         #     jdbc_df.write.orc(datalake_target_path, mode='overwrite')
 
     def extract_db(self, source_system_name, source_system_tag, scheme, table_name,
-                   mode, **kwargs) -> BaseOperator:
+                   mode, params=None) -> BaseOperator:
         """
         :param source_system_name: Source system (e.g.: flexcube)
         :param source_system_tag: Source system tag (e.g.: main, test, prod)
         :param scheme: Scheme name in source database
         :param table_name: Table
         :param mode: full/delta/manual
-        :param kwargs: Parameters
+        :param params: Parameters
         :return:
         """
+        source_system_name = source_system_name.lower()
+        source_system_tag = source_system_tag.lower()
+        scheme = scheme.lower()
+        table_name = table_name.lower()
+        mode = mode.lower()
+
         if mode == 'full':
             task_id = f"task_extract_" \
                       f"{source_system_name.lower()}_{source_system_tag.lower()}_{table_name.lower()}_full"
@@ -108,7 +114,7 @@ class AirflowETL:
                                       "source_system_tag": source_system_tag,
                                       "scheme": scheme,
                                       "table_name": table_name,
-                                      "params": kwargs,
+                                      "params": params,
                                   },
                                   dag=self.dag)
         elif mode == 'delta':
@@ -121,7 +127,7 @@ class AirflowETL:
                                       "source_system_tag": source_system_tag,
                                       "scheme": scheme,
                                       "table_name": table_name,
-                                      "params": kwargs,
+                                      "params": params,
                                   },
                                   dag=self.dag)
 
