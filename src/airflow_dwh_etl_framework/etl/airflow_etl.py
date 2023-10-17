@@ -92,6 +92,9 @@ class AirflowETL:
     def foo(cls):
         print(123123123)
 
+    def m1(self):
+        return PythonOperator(dag=self.dag, python_callable=AirflowETL.foo, task_id="asdasdasdasd")
+
     def extract_db(self, source_system_name, source_system_tag, scheme, table_name,
                    mode, params=None) -> BaseOperator:
         """
