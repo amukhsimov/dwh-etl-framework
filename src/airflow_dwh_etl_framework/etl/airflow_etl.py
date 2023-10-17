@@ -103,13 +103,13 @@ class AirflowETL:
         :param params: Parameters
         :return:
         """
+        return PythonOperator(dag=self.dag, python_callable=AirflowETL.foo, task_id="asdas123sdasdasd")
         source_system_name = source_system_name.lower()
         source_system_tag = source_system_tag.lower()
         scheme = scheme.lower()
         table_name = table_name.lower()
         mode = mode.lower()
 
-        return PythonOperator(dag=self.dag, python_callable=AirflowETL.foo, task_id="asdas123sdasdasd")
 
         task_id = f"task_extract_" \
                   f"{source_system_name}_{source_system_tag}_{table_name}_full"
