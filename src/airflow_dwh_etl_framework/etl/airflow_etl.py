@@ -52,7 +52,14 @@ class AirflowETL:
             )
 
             jdbc_df = spark_conn.read_jdbc(url=url, driver=driver, query=query)
-            jdbc_df.write.orc(datalake_target_path, mode=mode)
+            hudi_options = {
+                'hoodie.table.name': table_name.lower()
+            }
+            jdbc_df.write \
+                .format('hudi') \
+                .options(**hudi_options) \
+                .mode(mode) \
+                .save(datalake_target_path)
 
     @classmethod
     def _extract_db_delta(cls, task_id, source_system_name, source_system_tag, scheme, table_name, params):
