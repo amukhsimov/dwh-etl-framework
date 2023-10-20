@@ -2,6 +2,7 @@ from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.operators.python import BaseOperator
 import os
+import pandas as pd
 from airflow.models import Variable
 import psycopg2
 import yaml
@@ -9,162 +10,290 @@ from .. import SparkConnector
 
 
 class ETLUtils:
-    @classmethod
-    def execute_postgres_script(cls, conn_info, sql_script):
-        """
-        Executes and commits script into a postgres database.
-        :param conn_info: connection info in to following format:
-            {'url': 'postgresql://[user[:password]@][netloc][:port][/dbname][?param1=value1&...]',
-             'host': '',
-             'port': ,
-             'dbname': '',
-             'username': '',
-             'password': ,
-             '...': '....'}
-        :param sql_script: sql script text
-        :return:
-        """
-        conn = psycopg2.connect(database=conn_info['dbname'],
-                                user=conn_info['username'],
-                                password=conn_info['password'],
-                                host=conn_info['host'],
-                                port=conn_info['port'])
-        cur = conn.cursor()
-        cur.execute(sql_script)
-        conn.commit()
-        conn.close()
-        cur.close()
+    class Postgres:
+        @classmethod
+        def execute_script(cls, conn_info, sql_script):
+            """
+            Executes and commits script into a postgres database.
+            :param conn_info: connection info in to following format:
+                {'url': 'postgresql://[user[:password]@][netloc][:port][/dbname][?param1=value1&...]',
+                 'host': '',
+                 'port': ,
+                 'dbname': '',
+                 'username': '',
+                 'password': ,
+                 '...': '....'}
+            :param sql_script: sql script text
+            :return:
+            """
+            conn = psycopg2.connect(database=conn_info['dbname'],
+                                    user=conn_info['username'],
+                                    password=conn_info['password'],
+                                    host=conn_info['host'],
+                                    port=conn_info['port'])
+            cur = conn.cursor()
+            cur.execute(sql_script)
+            conn.commit()
+            conn.close()
+            cur.close()
 
-    @classmethod
-    def get_datalake_dump_dir(cls):
-        return 's3a://dump/etl'
+        @classmethod
+        def load_sql_script_spark(cls, conn_info, sql_script, spark):
+            raise NotImplementedError()
 
-    @classmethod
-    def spark_execute_sql_file(cls, spark, filename, cache_dir=None, alias=None):
-        """
-        Runs sql file in a given spark session, caches result and loads it as a view if
-            cache_dir and alias is provided
-        :param spark:
-        :param filename:
-        :param cache_dir:
-        :param alias:
-        :return:
-        """
-        # check if file exists
-        if not os.path.isfile(filename):
-            raise FileNotFoundError(f"SQL file not exists: {filename}")
-        # read sql script from file
-        with open(filename, 'rt') as fp:
-            sql_script = fp.read()
-        # run sql script via spark session
-        df = spark.sql(sql_script)
-        # if cache_dir is specified - cache it
-        if cache_dir:
-            df.write.orc(cache_dir, mode='overwrite')
-            df = spark.read.orc(cache_dir)
-        # if alias is specified - create a view
-        if alias:
-            df.createOrReplaceTempView(alias)
-        return df
+        @classmethod
+        def load_sql_script(cls, conn_info, query):
+            conn = psycopg2.connect(database=conn_info['dbname'],
+                                    user=conn_info['username'],
+                                    password=conn_info['password'],
+                                    host=conn_info['host'],
+                                    port=conn_info['port'])
+            cur = conn.cursor()
+            cur.execute(query)
+            data = cur.fetchall()
+            columns = [x.name for x in cur.description]
+            conn.close()
+            cur.close()
+            return pd.DataFrame(data, columns=columns)
 
-    @classmethod
-    def write_df_to_postgres(cls, spark_df, postgres_conn_info, target_schema, target_table_name, write_mode):
-        """
-        :param spark_df: spark dataframe to write
-        :param postgres_conn_info: connection info in to following format:
-            {'url': 'postgresql://[user[:password]@][netloc][:port][/dbname][?param1=value1&...]',
-             'host': '',
-             'port': ,
-             'dbname': '',
-             'username': '',
-             'password': ,
-             '...': '....'}
-        :param target_schema: schema name in postgres database
-        :param target_table_name: table name in postgres database
-        :param write_mode: if 'overwrite' - truncates the table and writes the data (overwrite/append)
-        :return:
-        """
-        if write_mode not in ('overwrite', 'append'):
-            raise ValueError(f"Invalid write_df_to_postgers write_mode: '{write_mode}'")
+        @classmethod
+        def write_df_to_db(cls, spark_df, postgres_conn_info, target_schema, target_table_name, write_mode):
+            """
+            :param spark_df: spark dataframe to write
+            :param postgres_conn_info: connection info in to following format:
+                {'url': 'postgresql://[user[:password]@][netloc][:port][/dbname][?param1=value1&...]',
+                 'host': '',
+                 'port': ,
+                 'dbname': '',
+                 'username': '',
+                 'password': ,
+                 '...': '....'}
+            :param target_schema: schema name in postgres database
+            :param target_table_name: table name in postgres database
+            :param write_mode: if 'overwrite' - truncates the table and writes the data (overwrite/append)
+            :return:
+            """
+            if write_mode not in ('overwrite', 'append'):
+                raise ValueError(f"Invalid write_df_to_postgers write_mode: '{write_mode}'")
 
-        properties = {"user": postgres_conn_info['username'],
-                      "password": postgres_conn_info['password'] or '',
-                      "driver": "org.postgresql.Driver"}
+            properties = {"user": postgres_conn_info['username'],
+                          "password": postgres_conn_info['password'] or '',
+                          "driver": "org.postgresql.Driver"}
 
-        if write_mode == 'overwrite':
-            ETLUtils.execute_postgres_script(
-                conn_info=postgres_conn_info,
-                sql_script=f"truncate table {target_schema}.{target_table_name};"
+            if write_mode == 'overwrite':
+                ETLUtils.Postgres.execute_script(
+                    conn_info=postgres_conn_info,
+                    sql_script=f"truncate table {target_schema}.{target_table_name};"
+                )
+
+            spark_df.write.jdbc(
+                url=f"jdbc:postgresql://{postgres_conn_info['host']}:"
+                    f"{postgres_conn_info['port']}/{postgres_conn_info['dbname']}",
+                table=f"{target_schema}.{target_table_name}",
+                mode='append',
+                properties=properties)
+
+        @classmethod
+        def get_table_cols(cls, conn_info, table_schema, table_name):
+            query = f"""
+            select t1.column_name, 
+                case when t3.column_name is not null then 'Y' else 'N' end as is_primary
+            from information_schema.columns t1
+            left join information_schema.table_constraints t2
+                on t2.table_schema = t1.table_schema 
+                    and t2.table_name = t1.table_name 
+                    and t2.constraint_type = 'PRIMARY KEY'
+            left join information_schema.key_column_usage t3
+                on t3.constraint_name = t2.constraint_name
+                    and t3.table_schema = t2.table_schema
+                    and t3.table_name = t2.table_name
+                    and t3.column_name = t1.column_name 
+            where t1.table_schema = '{table_schema}'
+                and t1.table_name = '{table_name}'
+            order by t1.ordinal_position;
+            """
+            return ETLUtils.Postgres.load_sql_script(conn_info=conn_info, query=query)
+
+        @classmethod
+        def merge_target_table(cls, conn_info, table_schema, table_name, merge_mode):
+            """
+            Merges *__journal table into master table
+            :param conn_info: postgres connection info
+            :param table_schema:
+            :param table_name:
+            :param merge_mode: full/delta
+            :return:
+            """
+            df_cols = ETLUtils.Postgres.get_table_cols(conn_info=conn_info,
+                                                       table_schema=table_schema,
+                                                       table_name=table_name)
+
+            partition_columns = ', '.join([
+                    f'"{col_name}"'
+                    for col_name in df_cols.loc[df_cols['is_primary'] == 'Y']['column_name'].values
+                ])
+            all_columns = ', '.join([
+                    f'"{col_name}"'
+                    for col_name in df_cols['column_name'].values
+                ])
+
+            if merge_mode == 'full':
+                # truncate master table
+                ETLUtils.Postgres.execute_script(
+                    conn_info=conn_info,
+                    sql_script=f'''
+                    truncate table {table_schema}."{table_name}"
+                    '''
+                )
+                # insert records into master table from journal
+                ETLUtils.Postgres.execute_script(
+                    conn_info=conn_info,
+                    sql_script=f'''
+                    INSERT INTO {table_schema}."{table_name}" AS t1 
+                    (
+                        SELECT {all_columns}
+                        FROM (
+                            SELECT {all_columns},
+                                row_number() over (partition BY {partition_columns}
+                                                   ORDER BY __transform_dt DESC, __load_dt DESC, __seqno ASC) AS rnk
+                            FROM {table_schema}."{table_name}__journal"
+                        ) AS t1
+                        WHERE rnk = 1
+                    )
+                    '''
+                )
+            elif merge_mode == 'delta':
+                # clear master table given corresponding records
+                conditions = ' and '.join([
+                    f't1."{col_name}" = t2."{col_name}"'
+                    for col_name in df_cols.loc[df_cols['is_primary'] == 'Y']['column_name'].values
+                ])
+                ETLUtils.Postgres.execute_script(
+                    conn_info=conn_info,
+                    sql_script=f'''
+                    DELETE FROM {table_schema}."{table_name}" AS t1
+                    USING (
+                        SELECT DISTINCT {partition_columns}
+                        FROM {table_schema}."{table_name}__journal"
+                        WHERE __record_state = 'A'
+                    ) AS t2
+                    WHERE ({conditions})
+                    '''
+                )
+                # insert records into master table from journal
+                ETLUtils.Postgres.execute_script(
+                    conn_info=conn_info,
+                    sql_script=f'''
+                    INSERT INTO {table_schema}."{table_name}" AS t1 
+                    (
+                        SELECT {all_columns}
+                        FROM (
+                            SELECT {all_columns},
+                                row_number() over (partition by {partition_columns}
+                                                   order by __transform_dt desc, __load_dt desc, __seqno asc) as rnk
+                            FROM {table_schema}."{table_name}__journal"
+                            WHERE __record_state = 'A'
+                        ) AS t1
+                        where rnk = 1
+                    )
+                    '''
+                )
+
+            ETLUtils.Postgres.execute_script(
+                conn_info=conn_info,
+                sql_script=f'''
+                UPDATE {table_schema}."{table_name}__journal" 
+                SET __record_state = 'H'
+                WHERE __record_state = 'A'
+                '''
             )
 
-        spark_df.write.jdbc(
-            url=f"jdbc:postgresql://{postgres_conn_info['host']}:"
-                f"{postgres_conn_info['port']}/{postgres_conn_info['dbname']}",
-            table=f"{target_schema}.{target_table_name}",
-            mode='append',
-            properties=properties)
+    class Datalake:
+        @classmethod
+        def get_dump_dir(cls):
+            return 's3a://dump/etl'
 
-    @classmethod
-    def merge_target_table(cls, table_name):
-        # TODO:
-        # depending on write mode truncate master table or
-        # delete existing records from master table.
-        # after that write new records into master table
-        raise NotImplementedError()
+    class Spark:
+        @classmethod
+        def execute_sql_file(cls, spark, filename, cache_dir=None, alias=None):
+            """
+            Runs sql file in a given spark session, caches result and loads it as a view if
+                cache_dir and alias is provided
+            :param spark:
+            :param filename:
+            :param cache_dir:
+            :param alias:
+            :return:
+            """
+            # check if file exists
+            if not os.path.isfile(filename):
+                raise FileNotFoundError(f"SQL file not exists: {filename}")
+            # read sql script from file
+            with open(filename, 'rt') as fp:
+                sql_script = fp.read()
+            # run sql script via spark session
+            df = spark.sql(sql_script)
+            # if cache_dir is specified - cache it
+            if cache_dir:
+                df.write.orc(cache_dir, mode='overwrite')
+                df = spark.read.orc(cache_dir)
+            # if alias is specified - create a view
+            if alias:
+                df.createOrReplaceTempView(alias)
+            return df
+        @classmethod
+        def load_dependencies(cls, dependencies, spark):
+            """
+            Creates temporal views in spark catalog.
+            :param dependencies: Tables in the following format:
+                [{  'source': 'datalake',
+                    'source_system_name': 'flexcube',
+                    'source_system_tag': 'main',
+                    'schema': 'ociuz',
+                    'table_name': 'gltb_rpt_vd_bal_custom',
+                    'alias': 'fc_saldo'},
+                   {'source': 'datalake',
+                    'source_system_name': 'flexcube',
+                    'source_system_tag': 'main',
+                    'schema': 'ociuz',
+                    'table_name': 'sttm_customer',
+                    'alias': 'fc_saldo'  }]
+            :return:
+            """
+            for dependency in dependencies:
+                source = dependency['source']
+                source_system_name = dependency['source_system_name']
+                source_system_tag = dependency['source_system_tag']
+                schema = dependency['schema']
+                source_table_name = dependency['table_name']
+                format = dependency['format']
+                alias = dependency['alias']
 
-    @classmethod
-    def load_dependencies_into_spark(cls, dependencies, spark):
-        """
-        Creates temporal views in spark catalog.
-        :param dependencies: Tables in the following format:
-            [{  'source': 'datalake',
-                'source_system_name': 'flexcube',
-                'source_system_tag': 'main',
-                'schema': 'ociuz',
-                'table_name': 'gltb_rpt_vd_bal_custom',
-                'alias': 'fc_saldo'},
-               {'source': 'datalake',
-                'source_system_name': 'flexcube',
-                'source_system_tag': 'main',
-                'schema': 'ociuz',
-                'table_name': 'sttm_customer',
-                'alias': 'fc_saldo'  }]
-        :return:
-        """
-        for dependency in dependencies:
-            source = dependency['source']
-            source_system_name = dependency['source_system_name']
-            source_system_tag = dependency['source_system_tag']
-            schema = dependency['schema']
-            source_table_name = dependency['table_name']
-            format = dependency['format']
-            alias = dependency['alias']
+                if not source:
+                    raise ValueError(f"load_dependencies_into_spark(): Invalid source: '{source}'")
+                if not source_system_name:
+                    raise ValueError(f"load_dependencies_into_spark(): Invalid source_system_name: '{source_system_name}'")
+                if not source_system_tag:
+                    raise ValueError(f"load_dependencies_into_spark(): Invalid source_system_tag: '{source_system_tag}'")
+                if not schema:
+                    raise ValueError(f"load_dependencies_into_spark(): Invalid schema: '{schema}'")
+                if not source_table_name:
+                    raise ValueError(f"load_dependencies_into_spark(): Invalid source_table_name: '{source_table_name}'")
+                if not format:
+                    raise ValueError(f"load_dependencies_into_spark(): Invalid format: '{format}'")
+                if not alias:
+                    raise ValueError(f"load_dependencies_into_spark(): Invalid alias: '{alias}'")
 
-            if not source:
-                raise ValueError(f"load_dependencies_into_spark(): Invalid source: '{source}'")
-            if not source_system_name:
-                raise ValueError(f"load_dependencies_into_spark(): Invalid source_system_name: '{source_system_name}'")
-            if not source_system_tag:
-                raise ValueError(f"load_dependencies_into_spark(): Invalid source_system_tag: '{source_system_tag}'")
-            if not schema:
-                raise ValueError(f"load_dependencies_into_spark(): Invalid schema: '{schema}'")
-            if not source_table_name:
-                raise ValueError(f"load_dependencies_into_spark(): Invalid source_table_name: '{source_table_name}'")
-            if not format:
-                raise ValueError(f"load_dependencies_into_spark(): Invalid format: '{format}'")
-            if not alias:
-                raise ValueError(f"load_dependencies_into_spark(): Invalid alias: '{alias}'")
+                if source == 'datalake':
+                    datalake_path = os.path.join(
+                        f"s3a://", source.lower(), source_system_name.lower(),
+                        source_system_tag.lower(), schema.lower(), source_table_name.lower()
+                    )
+                    source_df = spark.read.format(format).load(datalake_path)
+                else:
+                    raise ValueError(f"Invalid source type: '{source}'")
 
-            if source == 'datalake':
-                datalake_path = os.path.join(
-                    f"s3a://", source.lower(), source_system_name.lower(),
-                    source_system_tag.lower(), schema.lower(), source_table_name.lower()
-                )
-                source_df = spark.read.format(format).load(datalake_path)
-            else:
-                raise ValueError(f"Invalid source type: '{source}'")
-
-            source_df.createOrReplaceTempView(alias)
+                source_df.createOrReplaceTempView(alias)
 
 
 class AirflowETL:
@@ -326,15 +455,15 @@ class AirflowETL:
             if not alias or len(alias) <= 1:
                 raise ValueError(f"Too short alias: '{alias}'")
 
-            ETLUtils.spark_execute_sql_file(
+            ETLUtils.Spark.execute_sql_file(
                 spark=spark,
                 filename=sql_file,
-                cache_dir=os.path.join(ETLUtils.get_datalake_dump_dir(), f"{task_id}", alias),
+                cache_dir=os.path.join(ETLUtils.Datalake.get_dump_dir(), f"{task_id}", alias),
                 alias=alias,
             )
             return None
         elif step_type == 'final':
-            df = ETLUtils.spark_execute_sql_file(
+            df = ETLUtils.Spark.execute_sql_file(
                 spark=spark,
                 filename=sql_file,
             )
@@ -398,13 +527,13 @@ class AirflowETL:
             migration_sql = fp.read()
         # run migration script
         greenplum_conn = yaml.safe_load(Variable.get('MAIN_GREENPLUM_CONN'))
-        ETLUtils.execute_postgres_script(greenplum_conn, migration_sql)
+        ETLUtils.Postgres.execute_script(greenplum_conn, migration_sql)
 
         #
         with SparkConnector(app_name=task_id) as spark_connector:
             # load dependencies
-            ETLUtils.load_dependencies_into_spark(dependencies=table_conf['dependencies'],
-                                                  spark=spark_connector.spark)
+            ETLUtils.Spark.load_dependencies(dependencies=table_conf['dependencies'],
+                                             spark=spark_connector.spark)
             transform_steps = table_conf['transform'][read_mode]
             # iterate through SQL steps
             final_df = AirflowETL._run_transform_steps(task_id=task_id,
@@ -412,15 +541,18 @@ class AirflowETL:
                                                        table_folder=table_folder,
                                                        spark=spark_connector.spark)
             # write final df to greenplum
-            ETLUtils.write_df_to_postgres(spark_df=final_df,
-                                          postgres_conn_info=greenplum_conn,
-                                          target_schema=target_schema,
-                                          target_table_name=f"{target_table_name}__journal",
-                                          write_mode=write_mode)
+            ETLUtils.Postgres.write_df_to_db(spark_df=final_df,
+                                             postgres_conn_info=greenplum_conn,
+                                             target_schema=target_schema,
+                                             target_table_name=f"{target_table_name}__journal",
+                                             write_mode=write_mode)
         # merge journal table into master table
-        # ETLUtils.merge_target_table(target_schema=target_schema,
-        #                             target_table_name=target_table_name,
-        #                             merge_mode=merge_mode)
+        ETLUtils.Postgres.merge_target_table(
+            conn_info=greenplum_conn,
+            table_schema=target_schema,
+            table_name=target_table_name,
+            merge_mode=merge_mode,
+        )
 
     def transform_db(self, target_schema, target_table_name, read_mode, write_mode, merge_mode='full') -> BaseOperator:
         """
