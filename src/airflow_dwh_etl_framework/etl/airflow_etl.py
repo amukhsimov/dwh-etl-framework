@@ -391,7 +391,7 @@ class AirflowETL:
 
         table_conf = conf[target_table_name]
         # read migration script
-        migration_file = os.path.join(table_folder, table_conf['migration_file'])
+        migration_file = os.path.join(table_folder, table_conf['migration'])
         if not os.path.isfile(migration_file):
             raise RuntimeError(f"Couldn't find migration file for table '{target_table_name}'")
         with open(migration_file, 'rt') as fp:
