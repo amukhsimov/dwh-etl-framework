@@ -137,7 +137,7 @@ class ETLUtils:
             source_system_tag = dependency['source_system_tag']
             schema = dependency['schema']
             source_table_name = dependency['table_name']
-            format = dependency['hudi']
+            format = dependency['format']
             alias = dependency['alias']
 
             if not source:
