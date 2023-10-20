@@ -137,25 +137,35 @@ class ETLUtils:
             source_system_tag = dependency['source_system_tag']
             schema = dependency['schema']
             source_table_name = dependency['table_name']
+            format = dependency['hudi']
             alias = dependency['alias']
 
-            if not source: raise ValueError(f"Invalid source: '{source}'")
-            if not source_system_name: raise ValueError(f"Invalid source_system_name: '{source_system_name}'")
-            if not source_system_tag: raise ValueError(f"Invalid source_system_tag: '{source_system_tag}'")
-            if not schema: raise ValueError(f"Invalid schema: '{schema}'")
-            if not source_table_name: raise ValueError(f"Invalid source_table_name: '{source_table_name}'")
-            if not alias: raise ValueError(f"Invalid alias: '{alias}'")
+            if not source:
+                raise ValueError(f"load_dependencies_into_spark(): Invalid source: '{source}'")
+            if not source_system_name:
+                raise ValueError(f"load_dependencies_into_spark(): Invalid source_system_name: '{source_system_name}'")
+            if not source_system_tag:
+                raise ValueError(f"load_dependencies_into_spark(): Invalid source_system_tag: '{source_system_tag}'")
+            if not schema:
+                raise ValueError(f"load_dependencies_into_spark(): Invalid schema: '{schema}'")
+            if not source_table_name:
+                raise ValueError(f"load_dependencies_into_spark(): Invalid source_table_name: '{source_table_name}'")
+            if not format:
+                raise ValueError(f"load_dependencies_into_spark(): Invalid format: '{format}'")
+            if not alias:
+                raise ValueError(f"load_dependencies_into_spark(): Invalid alias: '{alias}'")
 
             if source == 'datalake':
                 datalake_path = os.path.join(
                     f"s3a://", source.lower(), source_system_name.lower(),
                     source_system_tag.lower(), schema.lower(), source_table_name.lower()
                 )
-                source_df = spark.read.format('hudi').load(datalake_path)
+                source_df = spark.read.format(format).load(datalake_path)
             else:
                 raise ValueError(f"Invalid source type: '{source}'")
 
             source_df.createOrReplaceTempView(alias)
+
 
 class AirflowETL:
     def __init__(self, dag: DAG):
