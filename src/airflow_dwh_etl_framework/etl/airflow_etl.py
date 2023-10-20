@@ -440,7 +440,7 @@ class AirflowETL:
         """
         if read_mode not in ('full', 'delta', 'manual'):
             raise ValueError(f"transform_db(): Invalid read_mode: '{read_mode}'")
-        if write_mode not in ('full', 'delta', 'manual'):
+        if write_mode not in ('overwrite', 'append'):
             raise ValueError(f"transform_db(): Invalid write_mode: '{write_mode}'")
         if merge_mode not in ('full', 'delta'):
             raise ValueError(f"transform_db(): Invalid merge_mode: '{merge_mode}'")
