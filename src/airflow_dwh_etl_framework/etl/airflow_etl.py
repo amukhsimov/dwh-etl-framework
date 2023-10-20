@@ -160,7 +160,6 @@ class ETLUtils:
                     f"s3a://", source.lower(), source_system_name.lower(),
                     source_system_tag.lower(), schema.lower(), source_table_name.lower()
                 )
-                print(format, datalake_path)
                 source_df = spark.read.format(format).load(datalake_path)
             else:
                 raise ValueError(f"Invalid source type: '{source}'")
@@ -307,7 +306,7 @@ class AirflowETL:
                                   dag=self.dag)
 
     @classmethod
-    def _run_sql_step(cls, task_id, transform_step, spark):
+    def _run_sql_step(cls, task_id, transform_step, table_folder, spark):
         """
         Runs a specific sql step. If the step is final - returns a dataframe
         :param task_id: Task id for datalake dump path
@@ -319,7 +318,7 @@ class AirflowETL:
         step_type = transform_step['type']
         assert step_type in ('cache', 'final')
         # fetch sql file
-        sql_file = transform_step['sql']
+        sql_file = os.path.join(table_folder, transform_step['sql'])
         if step_type == 'cache':
             if 'alias' not in transform_step:
                 raise ValueError(f"No alias provided for sql step type 'cache'")
@@ -342,7 +341,7 @@ class AirflowETL:
             return df
 
     @classmethod
-    def _run_transform_steps(cls, task_id, transform_steps, spark):
+    def _run_transform_steps(cls, task_id, transform_steps, table_folder, spark):
         """
         Iterates through sql scripts
         :param task_id:
@@ -356,7 +355,7 @@ class AirflowETL:
         for transform_step in transform_steps:
             # if step is and sql-file
             if 'sql' in transform_step:
-                final_df = AirflowETL._run_sql_step(task_id, transform_step, spark)
+                final_df = AirflowETL._run_sql_step(task_id, transform_step, table_folder, spark)
                 if final_df:
                     return final_df
             elif 'python' in transform_step:
@@ -410,6 +409,7 @@ class AirflowETL:
             # iterate through SQL steps
             final_df = AirflowETL._run_transform_steps(task_id=task_id,
                                                        transform_steps=transform_steps,
+                                                       table_folder=table_folder,
                                                        spark=spark_connector.spark)
             # write final df to greenplum
             ETLUtils.write_df_to_postgres(spark_df=final_df,
