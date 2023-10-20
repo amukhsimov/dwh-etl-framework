@@ -160,6 +160,7 @@ class ETLUtils:
                     f"s3a://", source.lower(), source_system_name.lower(),
                     source_system_tag.lower(), schema.lower(), source_table_name.lower()
                 )
+                print("format", datalake_path)
                 source_df = spark.read.format(format).load(datalake_path)
             else:
                 raise ValueError(f"Invalid source type: '{source}'")
