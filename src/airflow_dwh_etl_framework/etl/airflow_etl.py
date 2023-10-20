@@ -445,7 +445,7 @@ class AirflowETL:
         if merge_mode not in ('full', 'delta'):
             raise ValueError(f"transform_db(): Invalid merge_mode: '{merge_mode}'")
 
-        if read_mode == 'overwrite':
+        if read_mode == 'full':
             task_id = f"task_transform_{target_schema}_{target_table_name}_{write_mode}"
             return PythonOperator(python_callable=AirflowETL._transform_full,
                                   task_id=task_id,
