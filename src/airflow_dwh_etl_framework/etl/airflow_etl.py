@@ -319,7 +319,7 @@ class ETLUtils:
 
                 if not source:
                     raise ValueError(f"load_dependencies_into_spark(): Invalid source: '{source}'")
-                if not (source == 'datalake' and path is not None) or \
+                if not (source == 'datalake' and path is not None) and \
                         (not source_system_name or not source_system_tag
                          or not schema or not source_table_name):
                     raise ValueError(f"load_dependencies_into_spark(): Path or source info has to be specified")
@@ -336,7 +336,10 @@ class ETLUtils:
                             f"s3a://", source.lower(), source_system_name.lower(),
                             source_system_tag.lower(), schema.lower(), source_table_name.lower()
                         )
-                    source_df = spark.read.format(format).load(datalake_path)
+                    if format == 'csv':
+                        source_df = spark.read.option('header', 'true').format(format).load(datalake_path)
+                    else:
+                        source_df = spark.read.format(format).load(datalake_path)
                 elif source == 'greenplum':
                     greenplum_conn = yaml.safe_load(Variable.get('MAIN_GREENPLUM_CONN'))
                     host = greenplum_conn['host']
