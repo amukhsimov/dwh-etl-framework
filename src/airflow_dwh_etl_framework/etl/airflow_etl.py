@@ -284,7 +284,9 @@ class ETLUtils:
             return ETLUtils.Spark.execute_sql_script(spark=spark,
                                                      sql_script=sql_script,
                                                      cache_dir=cache_dir,
-                                                     alias=alias)
+                                                     alias=alias,
+                                                     engine=engine,
+                                                     **kwargs)
 
         @classmethod
         def load_dependencies(cls, dependencies, spark):
@@ -306,34 +308,34 @@ class ETLUtils:
             :return:
             """
             for dependency in dependencies:
-                source = dependency['source']
-                source_system_name = dependency['source_system_name']
-                source_system_tag = dependency['source_system_tag']
-                schema = dependency['schema']
-                source_table_name = dependency['table_name']
-                format = dependency['format']
-                alias = dependency['alias']
+                source = dependency.get('source')
+                path = dependency.get('path')
+                source_system_name = dependency.get('source_system_name')
+                source_system_tag = dependency.get('source_system_tag')
+                schema = dependency.get('schema')
+                source_table_name = dependency.get('source_table_name')
+                format = dependency.get('format')
+                alias = dependency.get('alias')
 
                 if not source:
                     raise ValueError(f"load_dependencies_into_spark(): Invalid source: '{source}'")
-                if not source_system_name:
-                    raise ValueError(f"load_dependencies_into_spark(): Invalid source_system_name: '{source_system_name}'")
-                if not source_system_tag:
-                    raise ValueError(f"load_dependencies_into_spark(): Invalid source_system_tag: '{source_system_tag}'")
-                if not schema:
-                    raise ValueError(f"load_dependencies_into_spark(): Invalid schema: '{schema}'")
-                if not source_table_name:
-                    raise ValueError(f"load_dependencies_into_spark(): Invalid source_table_name: '{source_table_name}'")
-                if format not in ('jdbc', 'datalake'):
+                if not (source == 'datalake' and path is not None) or \
+                        (not source_system_name or not source_system_tag
+                         or not schema or not source_table_name):
+                    raise ValueError(f"load_dependencies_into_spark(): Path or source info has to be specified")
+                if format not in ('jdbc', 'datalake', 'csv'):
                     raise ValueError(f"load_dependencies_into_spark(): Invalid format: '{format}'")
                 if not alias:
                     raise ValueError(f"load_dependencies_into_spark(): Invalid alias: '{alias}'")
 
                 if source == 'datalake':
-                    datalake_path = os.path.join(
-                        f"s3a://", source.lower(), source_system_name.lower(),
-                        source_system_tag.lower(), schema.lower(), source_table_name.lower()
-                    )
+                    if path:
+                        datalake_path = os.path.join('s3a://', path)
+                    else:
+                        datalake_path = os.path.join(
+                            f"s3a://", source.lower(), source_system_name.lower(),
+                            source_system_tag.lower(), schema.lower(), source_table_name.lower()
+                        )
                     source_df = spark.read.format(format).load(datalake_path)
                 elif source == 'greenplum':
                     greenplum_conn = yaml.safe_load(Variable.get('MAIN_GREENPLUM_CONN'))
