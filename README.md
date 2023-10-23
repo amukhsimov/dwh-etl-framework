@@ -17,7 +17,7 @@ and writes it to datalake (S3) in format of `hudi` in the following path: <br>
 
 **Connection details** must be specified in airflow variables with the following naming:
 `<source_system_tag.upper()>_<source_system_name.upper()>_CONN` <br>
-*Value of this variable should have the following yaml structure:*
+Value of this variable should have the following yaml structure:
 ```
 url: jdbc...
 host: ip address
@@ -28,13 +28,16 @@ username: database username
 password: user password
 ```
 
-`read_mode` - *specifies whether to load full table or to load only incremental data.* <br>
-Possible values:
- - `full` - _reads full table._
- - `delta` - _reads only incremental data._
+SQL file for extraction should be stored in the following file: <br>
+`<AIRFLOW_SQL_FOLDER>/extract/<source_system_name>/<source_system_tag>/<schema>/<table_name>-full.sql`
 
-`write_mode` - *specifies whether to truncate target table before appending data.* <br>
+`read_mode` - specifies whether to load full table or to load only incremental data. <br>
 Possible values:
- - `overwrite` - _truncates target table and writes the data._
- - `append` - _appends data to the target table without deleting data._
+ - `full` - reads full table.
+ - `delta` - reads only incremental data *(not implemented yet)*.
+
+`write_mode` - specifies whether to truncate target table before appending data. <br>
+Possible values:
+ - `overwrite` - truncates target table and writes the data.
+ - `append` - appends data to the target table without deleting data.
 

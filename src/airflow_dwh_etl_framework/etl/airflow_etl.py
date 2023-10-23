@@ -377,7 +377,6 @@ class ETLUtils:
         return sql_script
 
 
-
 class AirflowETL:
     def __init__(self, dag: DAG):
         self.dag: DAG = dag
