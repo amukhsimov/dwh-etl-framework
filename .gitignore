@@ -1,1 +1,4 @@
-.idea/*
+*.idea*
+*amukhsimov_dwh_etl_framework.egg-info*
+build*
+venv*
