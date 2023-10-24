@@ -318,15 +318,19 @@ class ETLUtils:
                 alias = dependency.get('alias')
 
                 if not source:
-                    raise ValueError(f"load_dependencies_into_spark(): Invalid source: '{source}'")
+                    raise ValueError(f"load_dependencies_into_spark(): Invalid source: '{source}'.")
                 if not (source == 'datalake' and path is not None) and \
                         (not source_system_name or not source_system_tag
                          or not schema or not source_table_name):
-                    raise ValueError(f"load_dependencies_into_spark(): Path or source info has to be specified")
+                    raise ValueError(f"load_dependencies_into_spark(): Path or source info has to be specified.")
                 if format not in ('jdbc', 'hudi', 'csv'):
                     raise ValueError(f"load_dependencies_into_spark(): Invalid format: '{format}'")
+                if format == 'jdbc' and source != 'greenplum':
+                    raise ValueError(f"'jdbc' dependency format is only supported for source type 'greenplum'.")
+                if source == 'greenplum' and format != 'jdbc':
+                    raise ValueError(f"'{format}' format is not supported for '{source}' source type.")
                 if not alias:
-                    raise ValueError(f"load_dependencies_into_spark(): Invalid alias: '{alias}'")
+                    raise ValueError(f"load_dependencies_into_spark(): Invalid alias: '{alias}'.")
 
                 if source == 'datalake':
                     if path:
