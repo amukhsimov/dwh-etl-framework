@@ -85,7 +85,7 @@ password: user password
 
 ## Transformation `config.yaml` file
 Transformation `config.yaml` file has the following structure:
-```
+```yaml
 - dependencies:                     # optional, specifies all needed dependencies
     - source: datalake              # source type. datalake/greenplum
     
