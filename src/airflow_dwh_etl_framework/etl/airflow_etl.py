@@ -522,7 +522,7 @@ class AirflowETL:
                                   dag=self.dag)
 
     @classmethod
-    def _run_sql_step(cls, task_id, transform_step, table_folder, spark):
+    def _run_select_step(cls, task_id, transform_step, table_folder, spark):
         """
         Runs a specific sql step. If the step is final - returns a dataframe
         :param task_id: Task id for datalake dump path
@@ -531,11 +531,11 @@ class AirflowETL:
         :return:
         """
         # check step type
-        step_type = transform_step['type']
-        engine = 'spark' if 'engine' not in transform_step else transform_step['engine']
+        engine = transform_step.get('engine', 'spark')
 
         assert engine in ('spark', 'greenplum')
-        assert step_type in ('cache', 'final')
+        if 'sql' not in transform_step:
+            raise ValueError(f"'sql' should be specified for 'select' step type")
 
         # fetch sql file
         with open(os.path.join(table_folder, transform_step['sql']), 'rt') as fp:
@@ -546,28 +546,68 @@ class AirflowETL:
             # format sql script with given parameters
             sql_script = ETLUtils.fill_sql_parameters(sql_script=sql_script, parameters=params)
 
-        if step_type == 'cache':
-            if 'alias' not in transform_step:
-                raise ValueError(f"No alias provided for sql step type 'cache'")
-            alias = transform_step['alias']
+        # if step needs to be cached
+        if 'cache' in transform_step:
+            if 'alias' not in transform_step['cache']:
+                raise ValueError(f"No alias provided for 'cached' select step")
+            alias = transform_step.get('cache').get('alias')
             if not alias or len(alias) <= 1:
                 raise ValueError(f"Too short alias: '{alias}'")
 
-            ETLUtils.Spark.execute_sql_script(
+            cache_dir = transform_step.get('cache').get(
+                'cache_dir', os.path.join(ETLUtils.Datalake.get_dump_dir(), f"{task_id}", alias)
+            )
+
+            return ETLUtils.Spark.execute_sql_script(
                 spark=spark,
                 sql_script=sql_script,
-                cache_dir=os.path.join(ETLUtils.Datalake.get_dump_dir(), f"{task_id}", alias),
+                cache_dir=cache_dir,
                 alias=alias,
                 engine=engine,
             )
-            return None
-        elif step_type == 'final':
+        # if it doesn't need to be cached
+        else:
             df = ETLUtils.Spark.execute_sql_script(
                 spark=spark,
                 sql_script=sql_script,
                 engine=engine,
             )
             return df
+
+    @classmethod
+    def _run_sql_script_step(cls, transform_step, table_folder):
+        """
+        Runs a specific sql step. If the step is final - returns a dataframe
+        :param task_id: Task id for datalake dump path
+        :param transform_step: transform step details
+        :param spark: spark instance
+        :return:
+        """
+        # check step type
+        engine = transform_step.get('engine', 'greenplum')
+
+        if engine != 'greenplum':
+            raise ValueError(f"Currently only 'greenplum' sql script engine is supported")
+
+        assert engine in ('spark', 'greenplum')
+
+        if 'sql' not in transform_step:
+            raise ValueError(f"'sql' should be specified for 'select' step type")
+
+        # fetch sql file
+        with open(os.path.join(table_folder, transform_step['sql']), 'rt') as fp:
+            sql_script = fp.read()
+        # if parameters are specified
+        if 'parameters' in transform_step:
+            params = transform_step['parameters']
+            # format sql script with given parameters
+            sql_script = ETLUtils.fill_sql_parameters(sql_script=sql_script, parameters=params)
+
+        ETLUtils.Postgres.execute_script(
+            conn_info=yaml.safe_load(Variable.get('MAIN_GREENPLUM_CONN')),
+            sql_script=sql_script,
+        )
+        return None
 
     @classmethod
     def _run_transform_steps(cls, task_id, transform_steps, table_folder, spark):
@@ -578,20 +618,25 @@ class AirflowETL:
         :param spark:
         :return:
         """
-        if not any([transform_step['type'] == 'final' for transform_step in transform_steps]):
-            raise ValueError(f"_run_transform_steps(): no final step provided for task '{task_id}'")
-
+        df = None
         for transform_step in transform_steps:
             # if step is and sql-file
-            if 'sql' in transform_step:
-                final_df = AirflowETL._run_sql_step(task_id, transform_step, table_folder, spark)
-                if final_df:
-                    return final_df
+            step_type = transform_step.get('type')
+
+            if not step_type: raise ValueError(f"step 'type' has to be specified in yaml file")
+
+            if step_type == 'select':
+                df = AirflowETL._run_select_step(task_id=task_id, transform_step=transform_step,
+                                                 table_folder=table_folder, spark=spark)
+            elif step_type == 'sql script':
+                AirflowETL._run_sql_script_step(transform_step=transform_step, table_folder=table_folder)
             elif 'python' in transform_step:
                 raise NotImplementedError()
 
+        return df
+
     @classmethod
-    def _transform_full(cls, task_id, target_schema, target_table_name, read_mode, write_mode, merge_mode):
+    def _transform_full(cls, task_id, table_folder, read_mode, write_mode, merge_mode):
         """
         This function
         :param task_id: task id to create spark application
@@ -602,56 +647,62 @@ class AirflowETL:
         :param merge_mode: full/delta
         :return:
         """
-        # get target table folder
-        table_folder = os.path.join(Variable.get("AIRFLOW_SQL_FOLDER"),
-                                    "transform", target_schema.lower(), target_table_name.lower())
         # load yaml file
         yaml_file = os.path.join(table_folder, 'config.yaml')
         if not os.path.isfile(yaml_file):
-            raise RuntimeError(f"Couldn't find yaml file for table '{target_table_name}'")
+            raise RuntimeError(f"Couldn't find yaml file: '{yaml_file}'")
         with open(yaml_file, 'rt') as fp:
             conf = yaml.safe_load(fp.read())
 
-        if target_table_name not in conf:
-            raise KeyError(f"Table '{target_table_name}' was not found in yaml config")
+        for table_conf in conf:
+            target_schema = table_conf.get('target', {}).get('target_schema')
+            target_table_name = table_conf.get('target', {}).get('target_table_name')
+            greenplum_conn = yaml.safe_load(Variable.get('MAIN_GREENPLUM_CONN'))
 
-        table_conf = conf[target_table_name]
-        # read migration script
-        migration_file = os.path.join(table_folder, table_conf['migration'])
-        if not os.path.isfile(migration_file):
-            raise RuntimeError(f"Couldn't find migration file for table '{target_table_name}'")
-        with open(migration_file, 'rt') as fp:
-            migration_sql = fp.read()
-        # run migration script
-        greenplum_conn = yaml.safe_load(Variable.get('MAIN_GREENPLUM_CONN'))
-        ETLUtils.Postgres.execute_script(greenplum_conn, migration_sql)
+            # read migration script
+            # if it exists
+            migration_file = os.path.join(table_folder, table_conf['migration'])
+            if os.path.isfile(migration_file):
+                # read
+                with open(migration_file, 'rt') as fp:
+                    migration_sql = fp.read()
+                # and run
+                ETLUtils.Postgres.execute_script(greenplum_conn, migration_sql)
 
-        #
-        with SparkConnector(app_name=task_id) as spark_connector:
-            # load dependencies
-            ETLUtils.Spark.load_dependencies(dependencies=table_conf['dependencies'],
-                                             spark=spark_connector.spark)
-            transform_steps = table_conf['transform'][read_mode]
-            # iterate through SQL steps
-            final_df = AirflowETL._run_transform_steps(task_id=task_id,
-                                                       transform_steps=transform_steps,
-                                                       table_folder=table_folder,
-                                                       spark=spark_connector.spark)
-            # write final df to greenplum
-            ETLUtils.Postgres.write_df_to_db(spark_df=final_df,
-                                             postgres_conn_info=greenplum_conn,
-                                             target_schema=target_schema,
-                                             target_table_name=f"{target_table_name}__journal",
-                                             write_mode=write_mode)
-        # merge journal table into master table
-        ETLUtils.Postgres.merge_target_table(
-            conn_info=greenplum_conn,
-            table_schema=target_schema,
-            table_name=target_table_name,
-            merge_mode=merge_mode,
-        )
+            #
+            with SparkConnector(app_name=task_id) as spark_connector:
+                # load dependencies
+                dependencies = table_conf.get('dependencies')
+                if dependencies:
+                    ETLUtils.Spark.load_dependencies(dependencies=table_conf['dependencies'],
+                                                     spark=spark_connector.spark)
 
-    def transform_db(self, target_schema, target_table_name, read_mode, write_mode, merge_mode='full') -> BaseOperator:
+                # run transform steps
+                transform_steps = table_conf.get('transform', {}).get(read_mode)
+                if transform_steps:
+                    # iterate through SQL steps
+                    final_df = AirflowETL._run_transform_steps(task_id=task_id,
+                                                               transform_steps=transform_steps,
+                                                               table_folder=table_folder,
+                                                               spark=spark_connector.spark)
+
+                    if final_df and target_schema and target_table_name:
+                        # write final df to greenplum
+                        ETLUtils.Postgres.write_df_to_db(spark_df=final_df,
+                                                         postgres_conn_info=greenplum_conn,
+                                                         target_schema=target_schema,
+                                                         target_table_name=f"{target_table_name}__journal",
+                                                         write_mode=write_mode)
+            if target_schema and target_table_name:
+                # merge journal table into master table
+                ETLUtils.Postgres.merge_target_table(
+                    conn_info=greenplum_conn,
+                    table_schema=target_schema,
+                    table_name=target_table_name,
+                    merge_mode=merge_mode,
+                )
+
+    def transform_db(self, table_folder, read_mode, write_mode, merge_mode='full') -> BaseOperator:
         """
         :param target_schema: Target schema in GreenPlum database.
         :param target_table_name: Target table name in GreenPlum database.
@@ -676,13 +727,12 @@ class AirflowETL:
             raise ValueError(f"transform_db(): Invalid merge_mode: '{merge_mode}'")
 
         if read_mode == 'full':
-            task_id = f"task_transform_{target_schema}_{target_table_name}_{write_mode}"
+            task_id = f"task_transform_{table_folder.replace('/', '_')}_{read_mode}"
             return PythonOperator(python_callable=AirflowETL._transform_full,
                                   task_id=task_id,
                                   op_kwargs={
                                       "task_id": task_id,
-                                      "target_schema": target_schema,
-                                      "target_table_name": target_table_name,
+                                      "table_folder": table_folder,
                                       "read_mode": read_mode,
                                       "write_mode": write_mode,
                                       "merge_mode": merge_mode,
