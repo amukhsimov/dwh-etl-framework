@@ -313,7 +313,7 @@ class ETLUtils:
                 source_system_name = dependency.get('source_system_name')
                 source_system_tag = dependency.get('source_system_tag')
                 schema = dependency.get('schema')
-                source_table_name = dependency.get('source_table_name')
+                source_table_name = dependency.get('table_name')
                 format = dependency.get('format')
                 alias = dependency.get('alias')
 
