@@ -323,7 +323,7 @@ class ETLUtils:
                         (not source_system_name or not source_system_tag
                          or not schema or not source_table_name):
                     raise ValueError(f"load_dependencies_into_spark(): Path or source info has to be specified")
-                if format not in ('jdbc', 'datalake', 'csv'):
+                if format not in ('jdbc', 'hudi', 'csv'):
                     raise ValueError(f"load_dependencies_into_spark(): Invalid format: '{format}'")
                 if not alias:
                     raise ValueError(f"load_dependencies_into_spark(): Invalid alias: '{alias}'")
