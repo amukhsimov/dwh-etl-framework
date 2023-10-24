@@ -73,7 +73,7 @@ Variable name must have the following name:
 `<source_system_tag.upper()>_<source_system_name.upper()>_CONN` <br>
 
 Value of this variable should have the following yaml structure:
-```
+```yaml
 url: jdbc...
 host: ip address
 port: port
