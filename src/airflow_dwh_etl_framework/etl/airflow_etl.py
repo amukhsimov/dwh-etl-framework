@@ -657,7 +657,7 @@ class AirflowETL:
                                                  table_folder=table_folder, spark=spark)
             elif step_type == 'sql script':
                 AirflowETL._run_sql_script_step(transform_step=transform_step, table_folder=table_folder)
-            elif 'python' in transform_step:
+            elif step_type == 'python':
                 AirflowETL._run_python_file_step(transform_step=transform_step, table_folder=table_folder)
 
         return df
