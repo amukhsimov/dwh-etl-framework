@@ -223,6 +223,10 @@ class ETLUtils:
         def get_dump_dir(cls):
             return 's3a://dump/etl'
 
+        @classmethod
+        def upload_file_to_s3(cls, source, target):
+            pass
+
     class Spark:
         @classmethod
         def execute_sql_script(cls, spark, sql_script, cache_dir=None,
@@ -363,6 +367,7 @@ class ETLUtils:
                     raise ValueError(f"Invalid source type: '{source}'")
 
                 source_df.createOrReplaceTempView(alias)
+
 
     @classmethod
     def fill_sql_parameters(cls, sql_script, parameters):
@@ -616,6 +621,22 @@ class AirflowETL:
         return None
 
     @classmethod
+    def _run_python_file_step(cls, transform_step, table_folder):
+        """
+        Runs a specific sql step. If the step is final - returns a dataframe
+        :param transform_step: transform step details
+        :return:
+        """
+        if 'python_file' not in transform_step:
+            raise ValueError(f"'python_file' should be specified for 'python' step type")
+
+        python_file = transform_step.get('python_file')
+
+        with open(python_file, "rb") as source_file:
+            code = compile(source_file.read(), python_file, "exec")
+        exec(code, globals(), locals())
+
+    @classmethod
     def _run_transform_steps(cls, task_id, transform_steps, table_folder, spark):
         """
         Iterates through sql scripts
@@ -637,7 +658,7 @@ class AirflowETL:
             elif step_type == 'sql script':
                 AirflowETL._run_sql_script_step(transform_step=transform_step, table_folder=table_folder)
             elif 'python' in transform_step:
-                raise NotImplementedError()
+                AirflowETL._run_python_file_step(transform_step=transform_step, table_folder=table_folder)
 
         return df
 
@@ -681,7 +702,7 @@ class AirflowETL:
                 dependencies = table_conf.get('dependencies')
                 if dependencies:
                     ETLUtils.Spark.load_dependencies(dependencies=table_conf['dependencies'],
-                                                     spark=spark_connector)
+                                                     spark_connector=spark_connector)
 
                 # run transform steps
                 transform_steps = table_conf.get('transform', {}).get(read_mode)
