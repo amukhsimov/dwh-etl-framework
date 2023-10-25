@@ -289,7 +289,7 @@ class ETLUtils:
                                                      **kwargs)
 
         @classmethod
-        def load_dependencies(cls, dependencies, spark):
+        def load_dependencies(cls, dependencies, spark_connector: SparkConnector):
             """
             Creates temporal views in spark catalog.
             :param dependencies: Tables in the following format:
@@ -341,22 +341,24 @@ class ETLUtils:
                             source_system_tag.lower(), schema.lower(), source_table_name.lower()
                         )
                     if format == 'csv':
-                        source_df = spark.read.option('header', 'true').format(format).load(datalake_path)
+                        source_df = spark_connector.spark.read.option('header', 'true') \
+                                .format(format).load(datalake_path)
                     else:
-                        source_df = spark.read.format(format).load(datalake_path)
+                        source_df = spark_connector.spark.read.format(format).load(datalake_path)
                 elif source == 'greenplum':
-                    greenplum_conn = yaml.safe_load(Variable.get('MAIN_GREENPLUM_CONN'))
-                    host = greenplum_conn['host']
-                    port = greenplum_conn['port']
-                    dbname = greenplum_conn['dbname']
+                    # greenplum_conn = yaml.safe_load(Variable.get('MAIN_GREENPLUM_CONN'))
+                    # host = greenplum_conn['host']
+                    # port = greenplum_conn['port']
+                    # dbname = greenplum_conn['dbname']
 
-                    source_df = spark.read.format(format) \
-                        .option("url", f"jdbc:postgresql://{host}:{port}/{dbname}") \
-                        .option("dbtable", f"{schema}.{source_table_name}") \
-                        .option("user", "spark") \
-                        .option("password", "") \
-                        .option("driver", "org.postgresql.Driver") \
-                        .load()
+                    source_df = spark_connector.read_greenplum_jdbc_table(schema=schema, table=source_table_name)
+                    # source_df = spark_connector.spark.read.format(format) \
+                    #     .option("url", f"jdbc:postgresql://{host}:{port}/{dbname}") \
+                    #     .option("dbtable", f"{schema}.{source_table_name}") \
+                    #     .option("user", "spark") \
+                    #     .option("password", "") \
+                    #     .option("driver", "org.postgresql.Driver") \
+                    #     .load()
                 else:
                     raise ValueError(f"Invalid source type: '{source}'")
 
@@ -679,7 +681,7 @@ class AirflowETL:
                 dependencies = table_conf.get('dependencies')
                 if dependencies:
                     ETLUtils.Spark.load_dependencies(dependencies=table_conf['dependencies'],
-                                                     spark=spark_connector.spark)
+                                                     spark=spark_connector)
 
                 # run transform steps
                 transform_steps = table_conf.get('transform', {}).get(read_mode)
