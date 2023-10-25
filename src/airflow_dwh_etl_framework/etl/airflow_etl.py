@@ -729,10 +729,9 @@ class AirflowETL:
                     merge_mode=merge_mode,
                 )
 
-    def transform_db(self, table_folder, read_mode, write_mode, merge_mode='full') -> BaseOperator:
+    def transform_db(self, table_folder, read_mode='full', write_mode='overwrite', merge_mode='full') -> BaseOperator:
         """
-        :param target_schema: Target schema in GreenPlum database.
-        :param target_table_name: Target table name in GreenPlum database.
+        :param table_folder: Target table folder in repository.
         :param read_mode: Data read mode (full/delta/manual).
             If 'full' mode specified - reads full source data tables.
             If 'delta' mode specified - reads only incremental data.
