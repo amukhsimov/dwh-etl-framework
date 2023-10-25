@@ -27,7 +27,7 @@ class SparkConnector:
         port = greenplum_conn['port']
         dbname = greenplum_conn['dbname']
         username = greenplum_conn['username']
-        password = greenplum_conn.get('password', '')
+        password = greenplum_conn.get('password') or ''
         url = f'jdbc:postgresql://{host}:{port}/{dbname}'
         driver = 'org.postgresql.Driver'
 
