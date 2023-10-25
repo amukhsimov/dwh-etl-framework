@@ -630,7 +630,7 @@ class AirflowETL:
         if 'python_file' not in transform_step:
             raise ValueError(f"'python_file' should be specified for 'python' step type")
 
-        python_file = transform_step.get('python_file')
+        python_file = os.path.join(table_folder, transform_step.get('python_file'))
 
         with open(python_file, "rb") as source_file:
             code = compile(source_file.read(), python_file, "exec")
