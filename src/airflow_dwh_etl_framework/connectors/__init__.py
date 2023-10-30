@@ -1,1 +1,1 @@
-from .connector import SparkConnector
+from .connector import SparkConnector, Connectors

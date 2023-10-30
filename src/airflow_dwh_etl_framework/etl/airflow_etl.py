@@ -6,7 +6,7 @@ import pandas as pd
 from airflow.models import Variable
 import psycopg2
 import yaml
-from .. import SparkConnector
+from .. import SparkConnector, Connectors
 
 
 class ETLUtils:
@@ -38,18 +38,19 @@ class ETLUtils:
             cur.close()
 
         @classmethod
-        def load_sql_script_spark(cls, greenplum_conn, sql_script, spark):
-            host = greenplum_conn['host']
-            port = greenplum_conn['port']
-            dbname = greenplum_conn['dbname']
+        def load_sql_script_spark(cls, greenplum_conn, sql_script, spark_connector: SparkConnector):
+            # host = greenplum_conn['host']
+            # port = greenplum_conn['port']
+            # dbname = greenplum_conn['dbname']
 
-            return spark.read.format('jdbc') \
-                .option("url", f"jdbc:postgresql://{host}:{port}/{dbname}") \
-                .option("query", sql_script) \
-                .option("user", "spark") \
-                .option("password", "") \
-                .option("driver", "org.postgresql.Driver") \
-                .load()
+            return spark_connector.read_jdbc(query=sql_script, conn_info=greenplum_conn)
+            # return spark_connector.spark.read.format('jdbc') \
+            #     .option("url", f"jdbc:postgresql://{host}:{port}/{dbname}") \
+            #     .option("query", sql_script) \
+            #     .option("user", "spark") \
+            #     .option("password", "") \
+            #     .option("driver", "org.postgresql.Driver") \
+            #     .load()
 
         @classmethod
         def load_sql_script(cls, conn_info, query):
@@ -67,7 +68,8 @@ class ETLUtils:
             return pd.DataFrame(data, columns=columns)
 
         @classmethod
-        def write_df_to_db(cls, spark_df, postgres_conn_info, target_schema, target_table_name, write_mode):
+        def write_df_to_db(cls, spark_df, spark_connector: SparkConnector,
+                           postgres_conn_info, target_schema, target_table_name, write_mode):
             """
             :param spark_df: spark dataframe to write
             :param postgres_conn_info: connection info in to following format:
@@ -86,9 +88,9 @@ class ETLUtils:
             if write_mode not in ('overwrite', 'append'):
                 raise ValueError(f"Invalid write_df_to_postgers write_mode: '{write_mode}'")
 
-            properties = {"user": postgres_conn_info['username'],
-                          "password": postgres_conn_info['password'] or '',
-                          "driver": "org.postgresql.Driver"}
+            # properties = {"user": postgres_conn_info['username'],
+            #               "password": postgres_conn_info.get('password') or '',
+            #               "driver": postgres_conn_info['driver']}
 
             if write_mode == 'overwrite':
                 ETLUtils.Postgres.execute_script(
@@ -96,12 +98,14 @@ class ETLUtils:
                     sql_script=f"truncate table {target_schema}.{target_table_name};"
                 )
 
-            spark_df.write.jdbc(
-                url=f"jdbc:postgresql://{postgres_conn_info['host']}:"
-                    f"{postgres_conn_info['port']}/{postgres_conn_info['dbname']}",
-                table=f"{target_schema}.{target_table_name}",
-                mode='append',
-                properties=properties)
+            spark_connector.write_jdbc(spark_df=spark_df, conn_info=postgres_conn_info,
+                                       target_schema=target_schema, target_table=target_table_name)
+
+            # spark_df.write.jdbc(
+            #     url=postgres_conn_info['spark_url'],
+            #     table=f"{target_schema}.{target_table_name}",
+            #     mode='append',
+            #     properties=properties)
 
         @classmethod
         def get_table_cols(cls, conn_info, table_schema, table_name):
@@ -229,12 +233,12 @@ class ETLUtils:
 
     class Spark:
         @classmethod
-        def execute_sql_script(cls, spark, sql_script, cache_dir=None,
+        def execute_sql_script(cls, spark_connector, sql_script, cache_dir=None,
                                alias=None, engine='spark', **kwargs):
             """
             Runs sql script in a given spark session, caches result and loads it as a view if
                 cache_dir and alias is provided
-            :param spark: spark session
+            :param spark_connector: spark connector
             :param sql_script: sql script to load
             :param cache_dir: directory in datalake to cache data
             :param alias: alias to create temp view in spark catalog
@@ -244,22 +248,22 @@ class ETLUtils:
             """
             if engine == 'spark':
                 # run sql script via spark session
-                df = spark.sql(sql_script)
+                df = spark_connector.spark.sql(sql_script)
             elif engine == 'greenplum':
                 if 'greenplum_conn' in kwargs:
                     greenplum_conn = kwargs['greenplum_conn']
                 else:
-                    greenplum_conn = yaml.safe_load(Variable.get('MAIN_GREENPLUM_CONN'))
+                    greenplum_conn = Connectors.get_greenplum_conn()
 
                 df = ETLUtils.Postgres.load_sql_script_spark(
-                    greenplum_conn=greenplum_conn, sql_script=sql_script, spark=spark,
+                    greenplum_conn=greenplum_conn, sql_script=sql_script, spark_connector=spark_connector,
                 )
             else:
                 raise ValueError(f"Invalid engine: '{engine}'")
             # if cache_dir is specified - cache it
             if cache_dir:
                 df.write.orc(cache_dir, mode='overwrite')
-                df = spark.read.orc(cache_dir)
+                df = spark_connector.spark.read.orc(cache_dir)
             # if alias is specified - create a view
             if alias:
                 df.createOrReplaceTempView(alias)
@@ -267,12 +271,12 @@ class ETLUtils:
 
 
         @classmethod
-        def execute_sql_file(cls, spark, filename, cache_dir=None,
+        def execute_sql_file(cls, spark_connector, filename, cache_dir=None,
                                alias=None, engine='spark', **kwargs):
             """
             Runs sql file in a given spark session, caches result and loads it as a view if
                 cache_dir and alias is provided
-            :param spark:
+            :param spark_connector:
             :param filename:
             :param cache_dir:
             :param alias:
@@ -285,7 +289,7 @@ class ETLUtils:
             with open(filename, 'rt') as fp:
                 sql_script = fp.read()
 
-            return ETLUtils.Spark.execute_sql_script(spark=spark,
+            return ETLUtils.Spark.execute_sql_script(spark_connector=spark_connector,
                                                      sql_script=sql_script,
                                                      cache_dir=cache_dir,
                                                      alias=alias,
@@ -355,7 +359,9 @@ class ETLUtils:
                     # port = greenplum_conn['port']
                     # dbname = greenplum_conn['dbname']
 
-                    source_df = spark_connector.read_greenplum_jdbc_table(schema=schema, table=source_table_name)
+                    greenplum_conn = Connectors.get_greenplum_conn()
+                    source_df = spark_connector.read_jdbc(conn_info=greenplum_conn,
+                                                          dbtable=f"{schema}.{source_table_name}")
                     # source_df = spark_connector.spark.read.format(format) \
                     #     .option("url", f"jdbc:postgresql://{host}:{port}/{dbname}") \
                     #     .option("dbtable", f"{schema}.{source_table_name}") \
@@ -423,9 +429,7 @@ class AirflowETL:
             with open(fname) as fp:
                 query = fp.read()
 
-            var_pref = f"{source_system_tag.upper()}_{source_system_name.upper()}"
-            url = yaml.safe_load(Variable.get(f"{var_pref}_CONN"))['url']
-            driver = Variable.get(f"{var_pref}_DRIVER")
+            conn_info = Connectors.get_conn(source_system_name, source_system_tag)
             datalake_target_path = os.path.join(
                 "s3a://datalake",
                 source_system_name.lower(),
@@ -434,7 +438,7 @@ class AirflowETL:
                 f"{table_name.lower()}"
             )
 
-            jdbc_df = spark_conn.read_jdbc(url=url, driver=driver, query=query)
+            jdbc_df = spark_conn.read_jdbc(conn_info=conn_info, query=query)
             hudi_options = {
                 'hoodie.table.name': table_name.lower()
             }
@@ -533,12 +537,12 @@ class AirflowETL:
                                   dag=self.dag)
 
     @classmethod
-    def _run_select_step(cls, task_id, transform_step, table_folder, spark):
+    def _run_select_step(cls, task_id, transform_step, table_folder, spark_connector):
         """
         Runs a specific sql step. If the step is final - returns a dataframe
         :param task_id: Task id for datalake dump path
         :param transform_step: transform step details
-        :param spark: spark instance
+        :param spark_connector: spark connector
         :return:
         """
         # check step type
@@ -570,7 +574,7 @@ class AirflowETL:
             )
 
             return ETLUtils.Spark.execute_sql_script(
-                spark=spark,
+                spark_connector=spark_connector,
                 sql_script=sql_script,
                 cache_dir=cache_dir,
                 alias=alias,
@@ -579,7 +583,7 @@ class AirflowETL:
         # if it doesn't need to be cached
         else:
             df = ETLUtils.Spark.execute_sql_script(
-                spark=spark,
+                spark_connector=spark_connector,
                 sql_script=sql_script,
                 engine=engine,
             )
@@ -589,9 +593,8 @@ class AirflowETL:
     def _run_sql_script_step(cls, transform_step, table_folder):
         """
         Runs a specific sql step. If the step is final - returns a dataframe
-        :param task_id: Task id for datalake dump path
         :param transform_step: transform step details
-        :param spark: spark instance
+        :param table_folder: target table folder
         :return:
         """
         # check step type
@@ -615,7 +618,7 @@ class AirflowETL:
             sql_script = ETLUtils.fill_sql_parameters(sql_script=sql_script, parameters=params)
 
         ETLUtils.Postgres.execute_script(
-            conn_info=yaml.safe_load(Variable.get('MAIN_GREENPLUM_CONN')),
+            conn_info=Connectors.get_greenplum_conn(),
             sql_script=sql_script,
         )
         return None
@@ -637,12 +640,12 @@ class AirflowETL:
         exec(code, globals(), locals())
 
     @classmethod
-    def _run_transform_steps(cls, task_id, transform_steps, table_folder, spark):
+    def _run_transform_steps(cls, task_id, transform_steps, table_folder, spark_connector):
         """
         Iterates through sql scripts
         :param task_id:
         :param transform_steps:
-        :param spark:
+        :param spark_connector: spark connector
         :return:
         """
         df = None
@@ -654,7 +657,7 @@ class AirflowETL:
 
             if step_type == 'select':
                 df = AirflowETL._run_select_step(task_id=task_id, transform_step=transform_step,
-                                                 table_folder=table_folder, spark=spark)
+                                                 table_folder=table_folder, spark_connector=spark_connector)
             elif step_type == 'sql script':
                 AirflowETL._run_sql_script_step(transform_step=transform_step, table_folder=table_folder)
             elif step_type == 'python':
@@ -667,8 +670,7 @@ class AirflowETL:
         """
         This function
         :param task_id: task id to create spark application
-        :param target_schema: target schema name in greenplum
-        :param target_table_name: target table name in greenplum
+        :param table_folder: target table folder, where config.yaml is located
         :param read_mode: full/delta/manual
         :param write_mode: append/overwrite
         :param merge_mode: full/delta
@@ -684,7 +686,7 @@ class AirflowETL:
         for table_conf in conf:
             target_schema = table_conf.get('target', {}).get('target_schema')
             target_table_name = table_conf.get('target', {}).get('target_table_name')
-            greenplum_conn = yaml.safe_load(Variable.get('MAIN_GREENPLUM_CONN'))
+            greenplum_conn = Connectors.get_greenplum_conn()
 
             # read migration script
             # if it exists
@@ -711,11 +713,12 @@ class AirflowETL:
                     final_df = AirflowETL._run_transform_steps(task_id=task_id,
                                                                transform_steps=transform_steps,
                                                                table_folder=table_folder,
-                                                               spark=spark_connector.spark)
+                                                               spark_connector=spark_connector)
 
                     if final_df and target_schema and target_table_name:
                         # write final df to greenplum
                         ETLUtils.Postgres.write_df_to_db(spark_df=final_df,
+                                                         spark_connector=spark_connector,
                                                          postgres_conn_info=greenplum_conn,
                                                          target_schema=target_schema,
                                                          target_table_name=f"{target_table_name}__journal",
