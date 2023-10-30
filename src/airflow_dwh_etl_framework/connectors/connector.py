@@ -48,8 +48,8 @@ class SparkConnector:
             .option("batchsize", Variable.get(f"{self.tag.upper()}_SPARK_BATCH_SIZE")) \
             .option("fetchsize", Variable.get(f"{self.tag.upper()}_SPARK_FETCH_SIZE")) \
             .option("driver", conn_info["driver"]) \
-            .option("mode", mode) \
             .option("dbtable", f"{target_schema}.{target_table}") \
+            .mode(mode) \
             .save()
 
     def __enter__(self):
