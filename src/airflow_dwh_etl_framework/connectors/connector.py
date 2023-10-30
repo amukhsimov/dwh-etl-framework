@@ -44,7 +44,7 @@ class SparkConnector:
         spark_df.write.format("jdbc") \
             .option("url", conn_info["spark_url"]) \
             .option("user", conn_info["username"]) \
-            .option("password", conn_info["password"]) \
+            .option("password", conn_info.get("password") or '') \
             .option("batchsize", Variable.get(f"{self.tag.upper()}_SPARK_BATCH_SIZE")) \
             .option("fetchsize", Variable.get(f"{self.tag.upper()}_SPARK_FETCH_SIZE")) \
             .option("driver", conn_info["driver"]) \
