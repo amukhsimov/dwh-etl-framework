@@ -440,7 +440,8 @@ class AirflowETL:
 
             jdbc_df = spark_conn.read_jdbc(conn_info=conn_info, query=query)
             hudi_options = {
-                'hoodie.table.name': table_name.lower()
+                'hoodie.table.name': table_name.lower(),
+                'hoodie.datasource.write.operation': 'bulk_insert'
             }
             jdbc_df.write \
                 .format('hudi') \
