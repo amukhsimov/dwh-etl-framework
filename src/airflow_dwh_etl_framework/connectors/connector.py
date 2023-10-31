@@ -34,11 +34,19 @@ class SparkConnector:
             .option("batchsize", Variable.get(f"{self.tag.upper()}_SPARK_BATCH_SIZE")) \
             .option("fetchsize", Variable.get(f"{self.tag.upper()}_SPARK_FETCH_SIZE")) \
             .option("driver", conn_info["driver"])
+
         if query:
             jdbc_df = jdbc_df.option("query", query)
         else:
             jdbc_df = jdbc_df.option("dbtable", dbtable)
+
+        if conn_info['type'].lower() == 'oracle':
+            jdbc_df = jdbc_df.option("oracle.jdbc.mapDateToTimestamp", "false")
+
         return jdbc_df.load()
+
+    def read_orc(self, path):
+        return self.spark.read.orc(path)
 
     def write_jdbc(self, spark_df, conn_info, target_schema, target_table, mode='append'):
         spark_df.write.format("jdbc") \

@@ -263,7 +263,7 @@ class ETLUtils:
             # if cache_dir is specified - cache it
             if cache_dir:
                 df.write.orc(cache_dir, mode='overwrite')
-                df = spark_connector.spark.read.orc(cache_dir)
+                df = spark_connector.read_orc(cache_dir)
             # if alias is specified - create a view
             if alias:
                 df.createOrReplaceTempView(alias)
