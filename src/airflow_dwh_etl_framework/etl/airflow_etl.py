@@ -404,11 +404,11 @@ class AirflowETL:
         self.dag: DAG = dag
 
     @classmethod
-    def _extract_db_full(cls, task_id, source_system_name, source_system_tag, scheme, table_name, write_mode):
+    def _extract_db_full(cls, task_id, source_system_name, source_system_tag, schema, table_name, write_mode):
         """
         :param source_system_name: Source system (e.g.: flexcube)
         :param source_system_tag: Source system tag (e.g.: main, test, prod)
-        :param scheme: Scheme name in source database
+        :param schema: Scheme name in source database
         :param table_name: Table
         :param write_mode: 'overwrite' - truncates target table and writes the data.
                            'append' - appends data to the target table without deleting data.
@@ -422,7 +422,7 @@ class AirflowETL:
         ) as spark_conn:
             fname = os.path.join(Variable.get("AIRFLOW_SQL_FOLDER"),
                                  "extract", source_system_name.lower(), source_system_tag.lower(),
-                                 scheme.lower(), f"{table_name.lower()}-full.sql")
+                                 schema.lower(), f"{table_name.lower()}-full.sql")
             if not os.path.isfile(fname):
                 raise FileNotFoundError(fname)
 
@@ -434,7 +434,7 @@ class AirflowETL:
                 "s3a://datalake",
                 source_system_name.lower(),
                 source_system_tag.lower(),
-                scheme.lower(),
+                schema.lower(),
                 f"{table_name.lower()}"
             )
 
@@ -483,12 +483,12 @@ class AirflowETL:
         #     jdbc_df = spark_conn.read_jdbc(url=url, driver=driver, query=query)
         #     jdbc_df.write.orc(datalake_target_path, mode='overwrite')
 
-    def extract_db(self, source_system_name, source_system_tag, scheme, table_name,
+    def extract_db(self, source_system_name, source_system_tag, schema, table_name,
                    read_mode, write_mode=None) -> BaseOperator:
         """
         :param source_system_name: Source system (e.g.: flexcube)
         :param source_system_tag: Source system tag (e.g.: main, test, prod)
-        :param scheme: Scheme name in source database
+        :param schema: Scheme name in source database
         :param table_name: Table
         :param read_mode: full/delta/manual
         :param write_mode: overwrite/append
@@ -504,7 +504,7 @@ class AirflowETL:
 
         source_system_name = source_system_name.lower()
         source_system_tag = source_system_tag.lower()
-        scheme = scheme.lower()
+        schema = schema.lower()
         table_name = table_name.lower()
         read_mode = read_mode.lower()
         write_mode = write_mode.lower()
@@ -518,7 +518,7 @@ class AirflowETL:
                                       "task_id": task_id,
                                       "source_system_name": source_system_name,
                                       "source_system_tag": source_system_tag,
-                                      "scheme": scheme,
+                                      "schema": schema,
                                       "table_name": table_name,
                                       "write_mode": write_mode,
                                   },
