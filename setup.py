@@ -19,7 +19,7 @@ setup(
         'cx_Oracle==8.3.0',
         'pandas==2.1.0',
         'numpy==1.24.4',
-        'apache-airflow==2.7.1',
+        'apache-airflow==2.8.3',
         'python-dotenv==1.0.0',
     ],
     # needs to be installed along with your package. Eg: 'caer'
